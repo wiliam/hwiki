@@ -1,16 +1,18 @@
 # hwiki
 
-A command-line interface for Confluence Server / Data Center. Uses Personal Access Token (PAT) authentication and the REST API v1.
+CLI для работы с Confluence Server/Data Center. Читает страницы, пишет, и делает двусторонний sync wiki-дерева в локальные markdown-файлы.
 
-## Install
+Использует Personal Access Token (PAT) и REST API v1.
+
+## Установка
 
 ```
 pipx install 'git+ssh://git@github.com/wiliam/hwiki.git@master'
 ```
 
-## Config
+## Конфиг
 
-Create `~/.hwiki_config`:
+Создать `~/.hwiki_config`:
 
 ```json
 {
@@ -21,48 +23,34 @@ Create `~/.hwiki_config`:
 }
 ```
 
-## Auth
+## Авторизация
 
-Generate a PAT in Confluence Server: go to your profile menu, choose **Personal Access Tokens**, then click **Create token**. Give it a name and copy the value.
+Сгенерировать PAT в Confluence: профиль → **Personal Access Tokens** → **Create token**.
 
-Then store it in your system keychain:
-
-```
-hwiki login
-```
-
-You will be prompted to paste the token. hwiki will verify it against your Confluence instance and store it securely.
-
-## Commands
-
-### `hwiki login`
-
-Prompt for a PAT and store it in the system keychain. Verifies the token by calling the Confluence API.
+Сохранить в keychain:
 
 ```
 hwiki login
 ```
+
+## Команды
 
 ### `hwiki get <id-or-url>`
 
-Fetch a Confluence page by its numeric ID or webui URL, and print it as Markdown.
+Получить страницу по ID или URL, вывести как Markdown.
 
 ```
 hwiki get 12345
-hwiki get https://wiki.example.com/pages/12345
-hwiki get 12345 --raw           # output raw storage XHTML
-hwiki get 12345 --json          # output full page JSON
-hwiki get 12345 -o page.md      # write Markdown to file
+hwiki get 'https://wiki.example.com/pages/viewpage.action?pageId=12345'
+hwiki get 'https://wiki.example.com/display/ENG/My+Page'
+hwiki get 12345 --raw          # сырой Confluence storage XHTML
+hwiki get 12345 --json         # полный объект страницы как JSON
+hwiki get 12345 -o page.md     # записать в файл
 ```
-
-Options:
-- `--raw` — print raw Confluence storage XHTML instead of Markdown
-- `--json` — print the full page object as JSON
-- `-o FILE` / `--out FILE` — write output to a file instead of stdout
 
 ### `hwiki search "<cql>"`
 
-Search Confluence pages using a CQL query. Results are printed in a columnar format with page ID, space key, title, and URL.
+Поиск страниц через CQL.
 
 ```
 hwiki search 'space = ENG AND title ~ "deploy"'
@@ -70,97 +58,104 @@ hwiki search 'space = ENG AND text ~ "redis"' -n 10
 hwiki search 'space = ENG' --json
 ```
 
-Options:
-- `-n N` / `--limit N` — maximum number of results (default: 25)
-- `--json` — print results as a JSON array
+### `hwiki create --space KEY --title T`
 
-### `hwiki create --space KEY --title T --file f.md`
-
-Create a new Confluence page. The body is read from a Markdown file or stdin and converted to Confluence storage XHTML.
+Создать новую страницу. Тело из md-файла или stdin, конвертируется в storage XHTML.
 
 ```
-hwiki create --space ENG --title "My New Page" --file page.md
+hwiki create --space ENG --title "My Page" --file page.md
 hwiki create --space ENG --title "Draft" --stdin < draft.md
-hwiki create --space ENG --title "Child Page" --file page.md --parent 12345
+hwiki create --space ENG --title "Child" --file page.md --parent 12345
 ```
 
-Options:
-- `--space KEY` — target space key (required)
-- `--title T` — page title (required)
-- `--file FILE` — read body from a Markdown file
-- `--stdin` — read body from stdin
-- `--parent ID-or-URL` — attach as child of this page
+### `hwiki update <id-or-url>`
 
-If neither `--file` nor `--stdin` is given, the page is created with an empty body.
-
-On success, prints: `created page id=<id> title=<title> url=<url>`
-
-### `hwiki update <id-or-url> --file f.md`
-
-Update an existing Confluence page. Fetches the current version automatically unless `--version N` is specified.
+Обновить существующую страницу.
 
 ```
 hwiki update 12345 --file updated.md
-hwiki update 12345 --stdin < updated.md
 hwiki update 12345 --title "New Title" --file updated.md
-hwiki update 12345 --title "New Title" --version 7 --file updated.md
+hwiki update 12345 --version 7 --title "New Title" --file updated.md
 ```
-
-Options:
-- `--title T` — new page title (optional; keeps existing title if omitted, unless `--version N` is given in which case it is required)
-- `--file FILE` — read new body from a Markdown file
-- `--stdin` — read new body from stdin
-- `--version auto|N` — current version number; `auto` fetches it automatically (default: `auto`); specify a number to skip the extra GET request
-
-Either `--file` or `--stdin` is required.
-
-On success, prints: `updated page id=<id> version=<new_version> title=<title>`
 
 ### `hwiki attach <id-or-url> <file>`
 
-Upload a file as an attachment to a Confluence page.
+Загрузить файл как вложение к странице.
 
 ```
 hwiki attach 12345 diagram.png
 hwiki attach 12345 report.pdf -m "Q4 report"
 ```
 
-Options:
-- `-m COMMENT` / `--message COMMENT` — attachment comment
+---
 
-On success, prints: `attached <filename> id=<attachment_id> to page <page_id>`
+## Sync: pull / push
 
-## Markdown support
+### `hwiki pull <id-or-url> [-n depth] [-d dir]`
 
-The following Markdown elements are converted to Confluence storage XHTML:
+Скачать страницу и дочерние (глубина -n) в локальную папку.
 
-- Headings (H1–H6)
-- Paragraphs and line breaks
-- Bold, italic, inline code
-- Fenced code blocks (with language hint)
-- Unordered and ordered lists
-- Blockquotes
-- Horizontal rules
-- Links and images
+```
+hwiki pull 12345 -d ./wiki/            # только корень (default depth=0)
+hwiki pull 12345 -n 2 -d ./wiki/       # корень + 2 уровня дочерних
+hwiki pull 12345 -n 1 -d ./wiki/ --attachments   # + скачать изображения
+```
 
-Explicitly unsupported (deferred):
+Создаёт файлы вида `{page_id}-{slug}.md` с front-matter:
 
-- Tables
-- Confluence macros (e.g., info/warning panels, table of contents)
-- Embedded Confluence-specific XHTML pass-through
-- Footnotes and task lists
+```markdown
+---
+id: "12345"
+title: Название страницы
+space: ENG
+version: 42
+parent_id: null
+---
+# Содержимое...
+```
 
-## Flags
+Внутренние ссылки на страницы из pull-сета становятся локальными (`./67890-other-page.md`).
+Манифест `.hwiki.json` хранит метаданные для push.
 
-- `-v` / `--verbose` — print all HTTP requests and responses to stderr (useful for debugging)
+### `hwiki push [file|id|url] [-d dir]`
 
-Exit codes:
-- `0` — success
-- `2` — argument or configuration error (bad args, missing config, missing token)
-- `3` — API error (HTTP error from Confluence)
+Загрузить изменённые файлы обратно на wiki.
 
-## Limitations
+```
+hwiki push -d ./wiki/                   # все изменённые файлы
+hwiki push -d ./wiki/ --dry-run         # показать что изменится
+hwiki push ./wiki/12345-my-page.md      # один файл
+hwiki push 12345 -d ./wiki/             # по ID
+hwiki push -d ./wiki/ --force           # перезаписать даже при конфликте версий
+```
 
-- Confluence Server and Data Center only (REST API v1). Confluence Cloud uses a different API and is not supported.
-- No `delete` command. Use the Confluence web UI or direct API calls to delete pages.
-- The PAT is stored in the system keychain via the `keyring` library. On headless systems you may need to configure a keyring backend.
+Изменение определяется по хешу содержимого. Если версия на wiki опередила локальную — конфликт (пропускается без `--force`).
+
+---
+
+## Поддерживаемый Markdown
+
+**При записи на wiki (md → storage):**
+h1–h6, параграфы, bold/italic/code, ссылки, изображения, списки (2 уровня),
+code blocks с языком, blockquote, hr, таблицы, callout-блоки (`> [!INFO]`, `[!WARNING]`, `[!NOTE]`, `[!TIP]`)
+
+**При чтении с wiki (storage → md):**
+Всё из записи + expand-макросы (`<details>`), section/column layout (flatten),
+panel, aura-tab (→ секции), task-list (→ `- [ ]`/`- [x]`), user mentions (`@mention_unresolved:<key>`).
+Неизвестные теги сохраняются как ` ```xml ` блок.
+
+---
+
+## Флаги
+
+- `-v` / `--verbose` — логировать HTTP-запросы в stderr
+
+Коды выхода: `0` — успех, `2` — ошибка аргументов/конфига, `3` — ошибка API.
+
+## Ограничения
+
+- Только Confluence Server / Data Center (REST API v1). Cloud не поддерживается.
+- Нет команды `delete`.
+- `push` только обновляет существующие страницы (no create/delete).
+- Таблицы с rowspan/colspan рендерятся как HTML (в Obsidian нужно включить Settings → Editor → "Render HTML in notes").
+- User mentions сохраняются как `@mention_unresolved:<userkey>` — resolve планируется.
