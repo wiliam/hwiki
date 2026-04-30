@@ -14,6 +14,38 @@ WRAPPER = (
     '</root>'
 )
 
+def _table_to_html(elem, ctx: _Ctx) -> str:
+    """Render spanning table as HTML with converted cell content."""
+    lines = ["<table>"]
+    tbody = elem.find("tbody")
+    rows_container = tbody if tbody is not None else elem
+    for tr in rows_container:
+        if tr.tag != "tr":
+            continue
+        lines.append("<tr>")
+        for cell in tr:
+            if cell.tag not in ("th", "td"):
+                continue
+            rs = cell.get("rowspan", "1")
+            cs = cell.get("colspan", "1")
+            attrs = ""
+            if rs != "1":
+                attrs += f' rowspan="{rs}"'
+            if cs != "1":
+                attrs += f' colspan="{cs}"'
+            blocks = [r for child in cell if (r := _node_to_md(child, ctx))]
+            content = "<br/>".join(b.strip() for b in blocks if b.strip()) if blocks else _inline(cell, ctx).strip()
+            lines.append(f"<{cell.tag}{attrs}>{content}</{cell.tag}>")
+        lines.append("</tr>")
+    lines.append("</table>")
+    return "\n".join(lines)
+
+
+def _raw_xml(elem) -> str:
+    xml = etree.tostring(elem, encoding="unicode")
+    return f"```xml\n{xml}\n```"
+
+
 _CALLOUT_MAP = {
     "info": "INFO",
     "warning": "WARNING",
@@ -121,6 +153,13 @@ def _ac_link_to_md(elem, ctx: _Ctx) -> str:
         if rich_body is not None:
             text = _inline(rich_body, ctx).strip()
 
+    # User mention — no display name in storage format, show @mention
+    user_el = elem.find(f"{{{RI}}}user")
+    if user_el is not None:
+        if text:
+            return f"@{text}"
+        return "@mention"
+
     url = ""
     page_el = elem.find(f"{{{RI}}}page")
     if page_el is not None:
@@ -188,13 +227,45 @@ def _node_to_md(elem, ctx: _Ctx) -> str | None:
     if tag == f"{{{AC}}}image":
         return _inline_node(elem, ctx)
 
+    # br at block level — skip
+    if tag == "br":
+        return None
+
+    # div — HTML container, flatten content
+    if tag == "div":
+        parts = [r for child in elem if (r := _node_to_md(child, ctx))]
+        return "\n\n".join(filter(None, parts)) or _inline(elem, ctx) or None
+
+    # ac:layout / ac:layout-section / ac:layout-cell — flatten content
+    if tag in (f"{{{AC}}}layout", f"{{{AC}}}layout-section", f"{{{AC}}}layout-cell"):
+        parts = [r for child in elem if (r := _node_to_md(child, ctx))]
+        return "\n\n".join(filter(None, parts)) or None
+
+    # ac:task-list — Confluence checklist → markdown checkboxes
+    if tag == f"{{{AC}}}task-list":
+        lines = []
+        for task in elem:
+            if task.tag != f"{{{AC}}}task":
+                continue
+            status_el = task.find(f"{{{AC}}}task-status")
+            body_el = task.find(f"{{{AC}}}task-body")
+            done = status_el is not None and (status_el.text or "").strip() == "complete"
+            checkbox = "[x]" if done else "[ ]"
+            body_text = _inline(body_el, ctx).strip() if body_el is not None else ""
+            if body_text:
+                first, *rest = body_text.splitlines()
+                lines.append(f"- {checkbox} {first}")
+                for line in rest:
+                    lines.append(f"  {line}")
+        return "\n".join(lines) if lines else None
+
     # Handle inline elements used at block level
     if tag in ("strong", "em", "code", "a", "span",
                f"{{{AC}}}link", f"{{{AC}}}inline-comment-marker"):
         return _inline_node(elem, ctx)
 
-    # Unknown / unsupported
-    return None
+    # Unknown — preserve raw XML so content is not lost
+    return _raw_xml(elem)
 
 
 def _list_to_md(elem, ordered: bool, depth: int, ctx: _Ctx) -> str:
@@ -226,6 +297,10 @@ def _list_to_md(elem, ordered: bool, depth: int, ctx: _Ctx) -> str:
 
 
 def _table_to_md(elem, ctx: _Ctx) -> str:
+    for cell in elem.iter("th", "td"):
+        if int(cell.get("rowspan", 1)) > 1 or int(cell.get("colspan", 1)) > 1:
+            return _table_to_html(elem, ctx)
+
     rows = []
     # Find all tr elements (may be in tbody)
     for tr in elem.iter("tr"):
@@ -322,6 +397,39 @@ def _macro_to_md(elem, ctx: _Ctx) -> str:
                 parts.append(result)
         return "\n\n".join(filter(None, parts)) or None
 
+    # panel / details — styled box, render rich-text-body content
+    if name in ("panel", "details"):
+        body_elem = elem.find(f"{{{AC}}}rich-text-body")
+        if body_elem is None:
+            return None
+        parts = [r for child in body_elem if (r := _node_to_md(child, ctx))]
+        return "\n\n".join(filter(None, parts)) or None
+
+    # aura-tab-collection — render each aura-tab as a section
+    if name == "aura-tab-collection":
+        body_elem = elem.find(f"{{{AC}}}rich-text-body")
+        if body_elem is None:
+            return None
+        sections = []
+        for child in body_elem:
+            if child.tag == f"{{{AC}}}structured-macro" and child.get(f"{{{AC}}}name") == "aura-tab":
+                tab_title = ""
+                tab_body = None
+                for sub in child:
+                    if sub.tag == f"{{{AC}}}parameter" and sub.get(f"{{{AC}}}name") == "title":
+                        tab_title = (sub.text or "").strip()
+                    elif sub.tag == f"{{{AC}}}rich-text-body":
+                        tab_body = sub
+                parts = []
+                if tab_body is not None:
+                    parts = [r for c in tab_body if (r := _node_to_md(c, ctx))]
+                body_text = "\n\n".join(filter(None, parts))
+                if tab_title:
+                    sections.append(f"#### {tab_title}\n\n{body_text}" if body_text else f"#### {tab_title}")
+                elif body_text:
+                    sections.append(body_text)
+        return "\n\n".join(sections) or None
+
     # expand macro — collapsible block → <details><summary>
     if name == "expand":
         expand_title = ""
@@ -341,5 +449,5 @@ def _macro_to_md(elem, ctx: _Ctx) -> str:
         summary = expand_title or "Details"
         return f"<details>\n<summary>{summary}</summary>\n\n{inner}\n\n</details>"
 
-    # Unsupported macro
-    return f"<!-- hwiki: unsupported {name} -->"
+    # Unknown macro — preserve raw XML
+    return _raw_xml(elem)

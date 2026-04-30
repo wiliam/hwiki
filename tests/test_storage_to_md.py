@@ -210,7 +210,8 @@ def test_unsupported_macro():
         f'</ac:structured-macro>'
     )
     result = storage_to_md(xhtml)
-    assert "<!-- hwiki: unsupported jira -->" in result
+    assert "```xml" in result
+    assert "jira" in result
 
 
 # ---------------------------------------------------------------------------

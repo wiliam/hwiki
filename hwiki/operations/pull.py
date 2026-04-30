@@ -21,8 +21,8 @@ class Operation(HwikiOperation):
             help="pull a Confluence page tree into local markdown files",
         )
         p.add_argument("root", help="root page ID or URL")
-        p.add_argument("-n", "--depth", type=int, default=1, metavar="N",
-                       help="recursion depth (0 = root only, default: 1)")
+        p.add_argument("-n", "--depth", type=int, default=0, metavar="N",
+                       help="recursion depth (0 = root only, default: 0)")
         p.add_argument("-d", "--dir", default="./wiki", dest="directory",
                        help="local directory (default: ./wiki)")
         p.add_argument("--attachments", nargs="?", const=True, default=False,
