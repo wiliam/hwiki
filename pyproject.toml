@@ -1,0 +1,30 @@
+[tool.poetry]
+name = "hwiki"
+version = "0.1.0"
+description = "Confluence helper CLI"
+authors = []
+
+[tool.poetry.dependencies]
+python = "^3.9"
+keyring = "^25.2.1"
+httpx = "^0.27"
+markdown-it-py = "^3.0"
+lxml = "^5.2"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+respx = "^0.21"
+
+[tool.poetry.scripts]
+hwiki = "hwiki.main:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 120
+skip-string-normalization = true
