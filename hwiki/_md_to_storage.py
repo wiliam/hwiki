@@ -1,23 +1,34 @@
 from __future__ import annotations
 
 import html
+import re
 from markdown_it import MarkdownIt
 
 
 _CALLOUT_TYPES = {"INFO", "WARNING", "NOTE", "TIP"}
 _CALLOUT_TO_MACRO = {k: k.lower() for k in _CALLOUT_TYPES}
 
+_LOCAL_LINK_RE = re.compile(r'^\./(\d+)[-.]')
 
-def md_to_storage(md: str) -> str:
+
+def _is_local_sync_link(href: str) -> str | None:
+    """Return page_id if href looks like ./123-slug.md, else None."""
+    m = _LOCAL_LINK_RE.match(href)
+    return m.group(1) if m else None
+
+
+def md_to_storage(md: str, page_map: dict[str, tuple[str, str]] | None = None) -> str:
     """Convert markdown to Confluence storage XHTML."""
     parser = MarkdownIt().enable("table")
     tokens = parser.parse(md)
-    parts = _render_tokens(tokens)
+    parts = _render_tokens(tokens, page_map=page_map or {})
     return "".join(parts)
 
 
-def _render_tokens(tokens: list) -> list[str]:
+def _render_tokens(tokens: list, page_map: dict | None = None) -> list[str]:
     """Walk a flat token list and produce XHTML string fragments."""
+    if page_map is None:
+        page_map = {}
     parts: list[str] = []
     i = 0
     while i < len(tokens):
@@ -27,7 +38,7 @@ def _render_tokens(tokens: list) -> list[str]:
         if tok.type == "heading_open":
             level = tok.tag  # "h1" .. "h6"
             inline_tok = tokens[i + 1]
-            content = _render_inline(inline_tok.children or [])
+            content = _render_inline(inline_tok.children or [], page_map=page_map)
             parts.append(f"<{level}>{content}</{level}>")
             i += 3  # heading_open, inline, heading_close
             continue
@@ -35,7 +46,7 @@ def _render_tokens(tokens: list) -> list[str]:
         # Paragraph
         if tok.type == "paragraph_open":
             inline_tok = tokens[i + 1]
-            content = _render_inline(inline_tok.children or [])
+            content = _render_inline(inline_tok.children or [], page_map=page_map)
             parts.append(f"<p>{content}</p>")
             i += 3
             continue
@@ -73,28 +84,28 @@ def _render_tokens(tokens: list) -> list[str]:
 
         # Bullet list
         if tok.type == "bullet_list_open":
-            end_idx, list_html = _render_list(tokens, i, "ul")
+            end_idx, list_html = _render_list(tokens, i, "ul", page_map=page_map)
             parts.append(list_html)
             i = end_idx + 1
             continue
 
         # Ordered list
         if tok.type == "ordered_list_open":
-            end_idx, list_html = _render_list(tokens, i, "ol")
+            end_idx, list_html = _render_list(tokens, i, "ol", page_map=page_map)
             parts.append(list_html)
             i = end_idx + 1
             continue
 
         # Blockquote
         if tok.type == "blockquote_open":
-            end_idx, bq_html = _render_blockquote(tokens, i)
+            end_idx, bq_html = _render_blockquote(tokens, i, page_map=page_map)
             parts.append(bq_html)
             i = end_idx + 1
             continue
 
         # Table
         if tok.type == "table_open":
-            end_idx, table_html = _render_table(tokens, i)
+            end_idx, table_html = _render_table(tokens, i, page_map=page_map)
             parts.append(table_html)
             i = end_idx + 1
             continue
@@ -104,8 +115,10 @@ def _render_tokens(tokens: list) -> list[str]:
     return parts
 
 
-def _render_inline(children: list) -> str:
+def _render_inline(children: list, page_map: dict | None = None) -> str:
     """Render a list of inline tokens to an HTML/XHTML string."""
+    if page_map is None:
+        page_map = {}
     parts = []
     i = 0
     while i < len(children):
@@ -119,12 +132,12 @@ def _render_inline(children: list) -> str:
             parts.append("<br/>")
         elif tok.type == "strong_open":
             # Collect until strong_close
-            inner, i = _collect_until(children, i + 1, "strong_close")
+            inner, i = _collect_until(children, i + 1, "strong_close", page_map=page_map)
             parts.append(f"<strong>{inner}</strong>")
             i += 1
             continue
         elif tok.type == "em_open":
-            inner, i = _collect_until(children, i + 1, "em_close")
+            inner, i = _collect_until(children, i + 1, "em_close", page_map=page_map)
             parts.append(f"<em>{inner}</em>")
             i += 1
             continue
@@ -133,8 +146,19 @@ def _render_inline(children: list) -> str:
         elif tok.type == "link_open":
             attrs = tok.attrs or {}
             href = attrs.get("href", "") if isinstance(attrs, dict) else ""
-            inner, i = _collect_until(children, i + 1, "link_close")
-            parts.append(f'<a href="{html.escape(href)}">{inner}</a>')
+            inner, i = _collect_until(children, i + 1, "link_close", page_map=page_map)
+            # Check if this is a local sync link (./123-slug.md)
+            pid = _is_local_sync_link(href)
+            if pid is not None and pid in page_map:
+                title, space = page_map[pid]
+                parts.append(
+                    f'<ac:link>'
+                    f'<ri:page ri:content-title="{html.escape(title)}" ri:space-key="{html.escape(space)}"/>'
+                    f'<ac:plain-text-link-body><![CDATA[{inner}]]></ac:plain-text-link-body>'
+                    f'</ac:link>'
+                )
+            else:
+                parts.append(f'<a href="{html.escape(href)}">{inner}</a>')
             i += 1
             continue
         elif tok.type == "image":
@@ -153,20 +177,22 @@ def _render_inline(children: list) -> str:
     return "".join(parts)
 
 
-def _collect_until(children: list, start: int, end_type: str) -> tuple[str, int]:
+def _collect_until(children: list, start: int, end_type: str, page_map: dict | None = None) -> tuple[str, int]:
     """Collect inline tokens from start until end_type, return (html, end_index)."""
     sub = []
     i = start
     while i < len(children):
         if children[i].type == end_type:
-            return _render_inline(sub), i
+            return _render_inline(sub, page_map=page_map), i
         sub.append(children[i])
         i += 1
-    return _render_inline(sub), i
+    return _render_inline(sub, page_map=page_map), i
 
 
-def _render_list(tokens: list, start: int, tag: str) -> tuple[int, str]:
+def _render_list(tokens: list, start: int, tag: str, page_map: dict | None = None) -> tuple[int, str]:
     """Render a bullet_list or ordered_list. Returns (end_index, html)."""
+    if page_map is None:
+        page_map = {}
     close_type = f"{'bullet' if tag == 'ul' else 'ordered'}_list_close"
     parts = []
     i = start + 1
@@ -182,7 +208,7 @@ def _render_list(tokens: list, start: int, tag: str) -> tuple[int, str]:
                 break
 
         if tok.type == "list_item_open" and depth == 1:
-            end_li, li_html = _render_list_item(tokens, i)
+            end_li, li_html = _render_list_item(tokens, i, page_map=page_map)
             parts.append(f"<li>{li_html}</li>")
             i = end_li
         else:
@@ -191,8 +217,10 @@ def _render_list(tokens: list, start: int, tag: str) -> tuple[int, str]:
     return i, f"<{tag}>{''.join(parts)}</{tag}>"
 
 
-def _render_list_item(tokens: list, start: int) -> tuple[int, str]:
+def _render_list_item(tokens: list, start: int, page_map: dict | None = None) -> tuple[int, str]:
     """Render content of a list_item_open..list_item_close. Returns (end_index, html)."""
+    if page_map is None:
+        page_map = {}
     parts = []
     i = start + 1
     depth = 1
@@ -210,19 +238,19 @@ def _render_list_item(tokens: list, start: int) -> tuple[int, str]:
         if depth == 1:
             if tok.type == "paragraph_open":
                 inline_tok = tokens[i + 1]
-                content = _render_inline(inline_tok.children or [])
+                content = _render_inline(inline_tok.children or [], page_map=page_map)
                 parts.append(content)
                 i += 3
                 continue
             elif tok.type == "inline":
-                parts.append(_render_inline(tok.children or []))
+                parts.append(_render_inline(tok.children or [], page_map=page_map))
             elif tok.type == "bullet_list_open":
-                end_idx, list_html = _render_list(tokens, i, "ul")
+                end_idx, list_html = _render_list(tokens, i, "ul", page_map=page_map)
                 parts.append(list_html)
                 i = end_idx + 1
                 continue
             elif tok.type == "ordered_list_open":
-                end_idx, list_html = _render_list(tokens, i, "ol")
+                end_idx, list_html = _render_list(tokens, i, "ol", page_map=page_map)
                 parts.append(list_html)
                 i = end_idx + 1
                 continue
@@ -232,8 +260,10 @@ def _render_list_item(tokens: list, start: int) -> tuple[int, str]:
     return i, "".join(parts)
 
 
-def _render_blockquote(tokens: list, start: int) -> tuple[int, str]:
+def _render_blockquote(tokens: list, start: int, page_map: dict | None = None) -> tuple[int, str]:
     """Render blockquote_open..blockquote_close. Detects callout syntax."""
+    if page_map is None:
+        page_map = {}
     inner_tokens = []
     i = start + 1
     depth = 1
@@ -257,7 +287,7 @@ def _render_blockquote(tokens: list, start: int) -> tuple[int, str]:
     if callout_type:
         macro_name = _CALLOUT_TO_MACRO[callout_type]
         # Get the paragraph content after the [!TYPE] marker
-        body_html = _render_callout_body(inner_tokens, callout_type)
+        body_html = _render_callout_body(inner_tokens, callout_type, page_map=page_map)
         result = (
             f'<ac:structured-macro ac:name="{macro_name}">'
             f'<ac:rich-text-body>{body_html}</ac:rich-text-body>'
@@ -266,7 +296,7 @@ def _render_blockquote(tokens: list, start: int) -> tuple[int, str]:
         return end_idx, result
 
     # Regular blockquote
-    inner_parts = _render_tokens(inner_tokens)
+    inner_parts = _render_tokens(inner_tokens, page_map=page_map)
     return end_idx, f"<blockquote>{''.join(inner_parts)}</blockquote>"
 
 
@@ -287,8 +317,10 @@ def _detect_callout(tokens: list) -> str | None:
     return None
 
 
-def _render_callout_body(tokens: list, callout_type: str) -> str:
+def _render_callout_body(tokens: list, callout_type: str, page_map: dict | None = None) -> str:
     """Render the body of a callout macro, skipping the [!TYPE] line."""
+    if page_map is None:
+        page_map = {}
     parts = []
     skip_first_para = True
     i = 0
@@ -313,7 +345,7 @@ def _render_callout_body(tokens: list, callout_type: str) -> str:
         if tok.type == "paragraph_open":
             inline_tok = tokens[i + 1] if i + 1 < len(tokens) else None
             if inline_tok and inline_tok.type == "inline":
-                content = _render_inline(inline_tok.children or [])
+                content = _render_inline(inline_tok.children or [], page_map=page_map)
                 parts.append(f"<p>{content}</p>")
             i += 3
             continue
@@ -323,8 +355,10 @@ def _render_callout_body(tokens: list, callout_type: str) -> str:
     return "".join(parts)
 
 
-def _render_table(tokens: list, start: int) -> tuple[int, str]:
+def _render_table(tokens: list, start: int, page_map: dict | None = None) -> tuple[int, str]:
     """Render table_open..table_close."""
+    if page_map is None:
+        page_map = {}
     i = start + 1
     depth = 1
     rows = []
@@ -358,7 +392,8 @@ def _render_table(tokens: list, start: int) -> tuple[int, str]:
         elif tok.type in ("th_close", "td_close"):
             if in_cell:
                 content = _render_inline(
-                    cell_tokens[0].children if cell_tokens else []
+                    cell_tokens[0].children if cell_tokens else [],
+                    page_map=page_map,
                 )
                 current_row.append((cell_tag, content))
                 in_cell = False

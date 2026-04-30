@@ -3,11 +3,30 @@ from pathlib import Path
 
 from ._http import HttpClient
 from ._types import Page, SearchHit, Attachment
+from ._text import parse_page_id, parse_display_url
 
 
 class ConfluenceClient:
     def __init__(self, http: HttpClient):
         self._http = http
+
+    def resolve_page_id(self, value: str) -> str:
+        """Resolve any page reference (ID, viewpage URL, or display URL) to a numeric ID."""
+        pid = parse_page_id(value)
+        if pid.isdigit():
+            return pid
+        space_key, title = parse_display_url(value)
+        if space_key and title:
+            data = self._http.get("rest/api/content", params={
+                "title": title,
+                "spaceKey": space_key,
+                "type": "page",
+                "limit": 1,
+            })
+            results = data.get("results", [])
+            if results:
+                return results[0]["id"]
+        return pid
 
     def whoami(self) -> dict:
         return self._http.get("rest/api/user/current")
@@ -67,6 +86,18 @@ class ConfluenceClient:
             media_type=result.get("metadata", {}).get("mediaType", ""),
             download_url=result["_links"]["download"],
         )
+
+    def get_children(self, page_id: str, limit: int = 50) -> list[Page]:
+        """Fetch direct child pages (metadata only, no body)."""
+        data = self._http.get(
+            f"rest/api/content/{page_id}/child/page",
+            params={"expand": "version,space", "limit": limit},
+        )
+        return [_parse_page(r) for r in data.get("results", [])]
+
+    def get_attachment_content(self, download_url: str) -> bytes:
+        """Download raw attachment bytes. download_url is relative (from Attachment.download_url)."""
+        return self._http.get(download_url.lstrip("/"))
 
 
 def _parse_page(data: dict) -> Page:

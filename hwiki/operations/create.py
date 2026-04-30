@@ -4,7 +4,6 @@ from pathlib import Path
 from . import HwikiOperation
 from .._http import HwikiHttpError
 from .._md_to_storage import md_to_storage
-from .._text import parse_page_id
 
 
 class Operation(HwikiOperation):
@@ -29,7 +28,7 @@ class Operation(HwikiOperation):
 
         parent_id = None
         if args.parent:
-            parent_id = parse_page_id(args.parent)
+            parent_id = self.client().resolve_page_id(args.parent)
 
         try:
             page = self.client().create_page(

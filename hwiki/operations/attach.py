@@ -3,7 +3,6 @@ from pathlib import Path
 
 from . import HwikiOperation
 from .._http import HwikiHttpError
-from .._text import parse_page_id
 
 
 class Operation(HwikiOperation):
@@ -15,7 +14,7 @@ class Operation(HwikiOperation):
         p.set_defaults(func=self._run, op=self)
 
     def _run(self, args):
-        pid = parse_page_id(args.page_id)
+        pid = self.client().resolve_page_id(args.page_id)
         file_path = Path(args.file)
 
         if not file_path.exists():

@@ -4,7 +4,6 @@ from pathlib import Path
 from . import HwikiOperation
 from .._http import HwikiHttpError
 from .._md_to_storage import md_to_storage
-from .._text import parse_page_id
 
 
 class Operation(HwikiOperation):
@@ -27,7 +26,7 @@ class Operation(HwikiOperation):
             print("ERROR: update: provide --file or --stdin", file=sys.stderr)
             sys.exit(2)
 
-        pid = parse_page_id(args.page_id)
+        pid = self.client().resolve_page_id(args.page_id)
 
         if args.version == "auto":
             try:

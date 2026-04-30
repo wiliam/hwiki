@@ -5,7 +5,6 @@ from pathlib import Path
 from . import HwikiOperation
 from .._http import HwikiHttpError
 from .._storage_to_md import storage_to_md
-from .._text import parse_page_id
 
 
 class Operation(HwikiOperation):
@@ -18,7 +17,7 @@ class Operation(HwikiOperation):
         p.set_defaults(func=self._run, op=self)
 
     def _run(self, args):
-        pid = parse_page_id(args.page_id)
+        pid = self.client().resolve_page_id(args.page_id)
         try:
             page = self.client().get_page(pid)
         except HwikiHttpError as e:
@@ -30,7 +29,14 @@ class Operation(HwikiOperation):
             print()
             return
 
-        body = page["body_storage"] if args.raw else storage_to_md(page["body_storage"])
+        if args.raw:
+            body = page["body_storage"]
+        else:
+            cfg = self.get_config()
+            body = storage_to_md(page["body_storage"],
+                                 host=cfg["host"],
+                                 space_key=page["space_key"],
+                                 page_id=page["id"])
         if args.out:
             Path(args.out).write_text(body)
         else:
