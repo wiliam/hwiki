@@ -153,12 +153,13 @@ def _ac_link_to_md(elem, ctx: _Ctx) -> str:
         if rich_body is not None:
             text = _inline(rich_body, ctx).strip()
 
-    # User mention — no display name in storage format, show @mention
+    # User mention — no display name in storage format, preserve userkey for later resolution
     user_el = elem.find(f"{{{RI}}}user")
     if user_el is not None:
+        userkey = user_el.get(f"{{{RI}}}userkey", "")
         if text:
             return f"@{text}"
-        return "@mention"
+        return f"@mention_unresolved:{userkey}" if userkey else "@mention"
 
     url = ""
     page_el = elem.find(f"{{{RI}}}page")
