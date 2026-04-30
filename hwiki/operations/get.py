@@ -1,43 +1,49 @@
 import json
 import sys
+from typing import Optional
 from pathlib import Path
 
-from . import HwikiOperation
+import typer
+
+from . import get_client, get_config
 from .._http import HwikiHttpError
 from .._storage_to_md import storage_to_md
 
+name = "get"
+help_text = "Fetch a Confluence page as Markdown"
 
-class Operation(HwikiOperation):
-    def configure_arg_parser(self, subparsers):
-        p = subparsers.add_parser("get", help="fetch a Confluence page")
-        p.add_argument("page_id", help="page ID or webui URL")
-        p.add_argument("--raw", action="store_true", help="output raw storage XHTML")
-        p.add_argument("--json", dest="as_json", action="store_true")
-        p.add_argument("-o", "--out", help="write to file instead of stdout")
-        p.set_defaults(func=self._run, op=self)
 
-    def _run(self, args):
-        pid = self.client().resolve_page_id(args.page_id)
-        try:
-            page = self.client().get_page(pid)
-        except HwikiHttpError as e:
-            print(f"ERROR: get {args.page_id}: {e.status_code} {e.body}", file=sys.stderr)
-            sys.exit(3)
+def run(
+    page_id: str = typer.Argument(..., help="Page ID or webui URL"),
+    raw: bool = typer.Option(False, "--raw", help="Output raw storage XHTML"),
+    as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+    out: Optional[Path] = typer.Option(None, "-o", "--out", help="Write to file"),
+) -> None:
+    client = get_client()
+    pid = client.resolve_page_id(page_id)
+    try:
+        page = client.get_page(pid)
+    except HwikiHttpError as e:
+        typer.echo(f"ERROR: get {page_id}: {e.status_code} {e.body}", err=True)
+        raise typer.Exit(3)
 
-        if args.as_json:
-            json.dump(page, sys.stdout, ensure_ascii=False, indent=2)
-            print()
-            return
+    if as_json:
+        json.dump(page, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+        return
 
-        if args.raw:
-            body = page["body_storage"]
-        else:
-            cfg = self.get_config()
-            body = storage_to_md(page["body_storage"],
-                                 host=cfg["host"],
-                                 space_key=page["space_key"],
-                                 page_id=page["id"])
-        if args.out:
-            Path(args.out).write_text(body)
-        else:
-            print(body)
+    if raw:
+        body = page["body_storage"]
+    else:
+        cfg = get_config()
+        body = storage_to_md(
+            page["body_storage"],
+            host=cfg["host"],
+            space_key=page["space_key"],
+            page_id=page["id"],
+        )
+
+    if out:
+        out.write_text(body)
+    else:
+        print(body)

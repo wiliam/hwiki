@@ -1,46 +1,51 @@
 import json
-import sys
-from pathlib import Path
 
 import keyring
+import typer
 
 from .._http import HttpClient
 from ..client import ConfluenceClient
 from ..utils import KEYRING_SERVICE, CONFIG_PATH
 
+_verbose: bool = False
+_config: dict | None = None
+_client: ConfluenceClient | None = None
 
-class HwikiOperation:
-    def __init__(self):
-        self._client_instance = None
-        self._verbose = False
 
-    def configure_arg_parser(self, subparsers):
-        raise NotImplementedError()
+def set_verbose(v: bool) -> None:
+    global _verbose
+    _verbose = v
 
-    def get_config(self) -> dict:
+
+def get_config() -> dict:
+    global _config
+    if _config is None:
         try:
-            with open(CONFIG_PATH) as f:
-                return json.load(f)
+            _config = json.loads(CONFIG_PATH.read_text())
         except FileNotFoundError:
-            print(f"ERROR: config not found — create {CONFIG_PATH}", file=sys.stderr)
-            sys.exit(2)
+            typer.echo(f"ERROR: config not found — create {CONFIG_PATH}", err=True)
+            raise typer.Exit(2)
+    return _config
 
-    def get_token(self) -> str:
-        cfg = self.get_config()
-        token = keyring.get_password(KEYRING_SERVICE, cfg["user"])
-        if not token:
-            print("ERROR: no token — run: hwiki login", file=sys.stderr)
-            sys.exit(2)
-        return token
 
-    def client(self) -> ConfluenceClient:
-        if self._client_instance is None:
-            cfg = self.get_config()
-            http = HttpClient(
-                base_url=cfg["host"],
-                token=self.get_token(),
-                timeout=cfg.get("timeout", 20),
-                verbose=self._verbose,
-            )
-            self._client_instance = ConfluenceClient(http)
-        return self._client_instance
+def get_token() -> str:
+    cfg = get_config()
+    token = keyring.get_password(KEYRING_SERVICE, cfg["user"])
+    if not token:
+        typer.echo("ERROR: no token — run: hwiki login", err=True)
+        raise typer.Exit(2)
+    return token
+
+
+def get_client() -> ConfluenceClient:
+    global _client
+    if _client is None:
+        cfg = get_config()
+        http = HttpClient(
+            base_url=cfg["host"],
+            token=get_token(),
+            timeout=cfg.get("timeout", 20),
+            verbose=_verbose,
+        )
+        _client = ConfluenceClient(http)
+    return _client

@@ -1,33 +1,36 @@
-#!/usr/bin/env python3
-import argparse
 import logging
 from importlib import import_module
 from pkgutil import walk_packages
 
+import typer
+
 import hwiki.operations
+from hwiki.operations import set_verbose
+
+app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich", help="Confluence CLI")
 
 
-def _parse_args():
-    parser = argparse.ArgumentParser(description="Confluence CLI")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="print HTTP calls and payloads to stderr")
-    subparsers = parser.add_subparsers(help="sub-command help", required=True)
+@app.callback()
+def callback(
+    verbose: bool = typer.Option(False, "-v", "--verbose",
+                                 help="Print HTTP calls and payloads to stderr"),
+):
+    if verbose:
+        set_verbose(True)
+        logging.basicConfig(level=logging.DEBUG)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    for module_info in walk_packages(hwiki.operations.__path__, hwiki.operations.__name__ + "."):
-        import_module(module_info.name).Operation().configure_arg_parser(subparsers)
 
-    return parser.parse_args()
+for _mi in walk_packages(hwiki.operations.__path__, hwiki.operations.__name__ + "."):
+    _mod = import_module(_mi.name)
+    if hasattr(_mod, "run"):
+        _name = getattr(_mod, "name", _mi.name.split(".")[-1])
+        _help = getattr(_mod, "help_text", None)
+        app.command(name=_name, help=_help)(_mod.run)
 
 
 def main():
-    args = _parse_args()
-    verbose = getattr(args, "verbose", False)
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-    if hasattr(args, "op") and verbose:
-        args.op._verbose = True
-    args.func(args)
+    app()
 
 
 if __name__ == "__main__":

@@ -1,74 +1,72 @@
-import sys
 from pathlib import Path
+from typing import Optional
 
-from . import HwikiOperation
+import sys
+import typer
+
+from . import get_client
 from .._http import HwikiHttpError
 from .._md_to_storage import md_to_storage
 
+name = "update"
+help_text = "Update an existing Confluence page"
 
-class Operation(HwikiOperation):
-    def configure_arg_parser(self, subparsers):
-        p = subparsers.add_parser("update", help="update an existing Confluence page")
-        p.add_argument("page_id", help="page ID or webui URL")
-        p.add_argument("--title", help="new page title (optional; defaults to existing title)")
-        p.add_argument("--file", help="read body from this .md file")
-        p.add_argument("--stdin", action="store_true", help="read body from stdin")
-        p.add_argument(
-            "--version",
-            default="auto",
-            metavar="auto|N",
-            help="current page version; 'auto' fetches it (default: auto)",
-        )
-        p.set_defaults(func=self._run, op=self)
 
-    def _run(self, args):
-        if not args.file and not args.stdin:
-            print("ERROR: update: provide --file or --stdin", file=sys.stderr)
-            sys.exit(2)
+def run(
+    page_id: str = typer.Argument(..., help="Page ID or webui URL"),
+    title: Optional[str] = typer.Option(None, "--title", help="New title (keeps existing if omitted)"),
+    file: Optional[Path] = typer.Option(None, "--file", help="Read body from .md file"),
+    stdin: bool = typer.Option(False, "--stdin", help="Read body from stdin"),
+    version: str = typer.Option("auto", "--version", metavar="auto|N",
+                                 help="Current version or 'auto' to fetch"),
+) -> None:
+    if not file and not stdin:
+        typer.echo("ERROR: update: provide --file or --stdin", err=True)
+        raise typer.Exit(2)
 
-        pid = self.client().resolve_page_id(args.page_id)
+    client = get_client()
+    pid = client.resolve_page_id(page_id)
 
-        if args.version == "auto":
-            try:
-                page = self.client().get_page(pid)
-            except HwikiHttpError as e:
-                print(f"ERROR: update {args.page_id}: {e.status_code} {e.body}", file=sys.stderr)
-                sys.exit(3)
-            current_version = page["version"]
-            title = args.title if args.title else page["title"]
-        else:
-            try:
-                current_version = int(args.version)
-            except ValueError:
-                print(
-                    f"ERROR: update: --version must be 'auto' or an integer, got {args.version!r}",
-                    file=sys.stderr,
-                )
-                sys.exit(2)
-            if not args.title:
-                print(
-                    "ERROR: update: --title is required when --version is specified manually",
-                    file=sys.stderr,
-                )
-                sys.exit(2)
-            title = args.title
-
-        if args.file:
-            md = Path(args.file).read_text()
-        else:
-            md = sys.stdin.read()
-
-        storage_xhtml = md_to_storage(md)
-
+    if version == "auto":
         try:
-            page = self.client().update_page(
-                pid,
-                title=title,
-                storage_xhtml=storage_xhtml,
-                current_version=current_version,
-            )
+            page = client.get_page(pid)
         except HwikiHttpError as e:
-            print(f"ERROR: update {args.page_id}: {e.status_code} {e.body}", file=sys.stderr)
-            sys.exit(3)
+            typer.echo(f"ERROR: update {page_id}: {e.status_code} {e.body}", err=True)
+            raise typer.Exit(3)
+        current_version = page["version"]
+        title = title if title else page["title"]
+    else:
+        try:
+            current_version = int(version)
+        except ValueError:
+            typer.echo(
+                f"ERROR: update: --version must be 'auto' or an integer, got {version!r}",
+                err=True,
+            )
+            raise typer.Exit(2)
+        if not title:
+            typer.echo(
+                "ERROR: update: --title is required when --version is specified manually",
+                err=True,
+            )
+            raise typer.Exit(2)
 
-        print(f"updated page id={page['id']} version={page['version']} title={page['title']}")
+    if file:
+        md = file.read_text()
+    else:
+        md = sys.stdin.read()
+
+    storage_xhtml = md_to_storage(md)
+
+    try:
+        page = client.update_page(
+            pid,
+            title=title,
+            storage_xhtml=storage_xhtml,
+            current_version=current_version,
+        )
+    except HwikiHttpError as e:
+        typer.echo(f"ERROR: update {page_id}: {e.status_code} {e.body}", err=True)
+        raise typer.Exit(3)
+
+    typer.echo(f"updated page id={page['id']} version={page['version']} title={page['title']}")

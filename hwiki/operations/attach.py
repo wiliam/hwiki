@@ -1,34 +1,35 @@
-import sys
 from pathlib import Path
+from typing import Optional
 
-from . import HwikiOperation
+import typer
+
+from . import get_client
 from .._http import HwikiHttpError
 
+name = "attach"
+help_text = "Upload a file attachment to a Confluence page"
 
-class Operation(HwikiOperation):
-    def configure_arg_parser(self, subparsers):
-        p = subparsers.add_parser("attach", help="upload a file attachment to a Confluence page")
-        p.add_argument("page_id", help="page ID or webui URL")
-        p.add_argument("file", help="path to the file to attach")
-        p.add_argument("-m", "--message", dest="comment", help="attachment comment")
-        p.set_defaults(func=self._run, op=self)
 
-    def _run(self, args):
-        pid = self.client().resolve_page_id(args.page_id)
-        file_path = Path(args.file)
+def run(
+    page_id: str = typer.Argument(..., help="Page ID or webui URL"),
+    file: Path = typer.Argument(..., help="File to attach"),
+    message: Optional[str] = typer.Option(None, "-m", "--message", help="Attachment comment"),
+) -> None:
+    client = get_client()
+    pid = client.resolve_page_id(page_id)
 
-        if not file_path.exists():
-            print(f"ERROR: attach: file not found: {args.file}", file=sys.stderr)
-            sys.exit(2)
+    if not file.exists():
+        typer.echo(f"ERROR: attach: file not found: {file}", err=True)
+        raise typer.Exit(2)
 
-        try:
-            attachment = self.client().upload_attachment(
-                pid,
-                file_path,
-                comment=args.comment,
-            )
-        except HwikiHttpError as e:
-            print(f"ERROR: attach {args.page_id}: {e.status_code} {e.body}", file=sys.stderr)
-            sys.exit(3)
+    try:
+        attachment = client.upload_attachment(
+            pid,
+            file,
+            comment=message,
+        )
+    except HwikiHttpError as e:
+        typer.echo(f"ERROR: attach {page_id}: {e.status_code} {e.body}", err=True)
+        raise typer.Exit(3)
 
-        print(f"attached {attachment['filename']} id={attachment['id']} to page {pid}")
+    typer.echo(f"attached {attachment['filename']} id={attachment['id']} to page {pid}")

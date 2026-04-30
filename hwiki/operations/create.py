@@ -1,46 +1,50 @@
-import sys
 from pathlib import Path
+from typing import Optional
 
-from . import HwikiOperation
+import sys
+import typer
+
+from . import get_client, get_config
 from .._http import HwikiHttpError
 from .._md_to_storage import md_to_storage
 
+name = "create"
+help_text = "Create a new Confluence page"
 
-class Operation(HwikiOperation):
-    def configure_arg_parser(self, subparsers):
-        p = subparsers.add_parser("create", help="create a new Confluence page")
-        p.add_argument("--space", required=True, help="space key")
-        p.add_argument("--title", required=True, help="page title")
-        p.add_argument("--file", help="read body from this .md file")
-        p.add_argument("--stdin", action="store_true", help="read body from stdin")
-        p.add_argument("--parent", help="parent page ID or URL (optional)")
-        p.set_defaults(func=self._run, op=self)
 
-    def _run(self, args):
-        if args.file:
-            md = Path(args.file).read_text()
-        elif args.stdin:
-            md = sys.stdin.read()
-        else:
-            md = ""
+def run(
+    space: str = typer.Option(..., "--space", help="Space key"),
+    title: str = typer.Option(..., "--title", help="Page title"),
+    file: Optional[Path] = typer.Option(None, "--file", help="Read body from .md file"),
+    stdin: bool = typer.Option(False, "--stdin", help="Read body from stdin"),
+    parent: Optional[str] = typer.Option(None, "--parent", help="Parent page ID or URL"),
+) -> None:
+    if file:
+        md = file.read_text()
+    elif stdin:
+        md = sys.stdin.read()
+    else:
+        md = ""
 
-        storage_xhtml = md_to_storage(md)
+    storage_xhtml = md_to_storage(md)
 
-        parent_id = None
-        if args.parent:
-            parent_id = self.client().resolve_page_id(args.parent)
+    client = get_client()
 
-        try:
-            page = self.client().create_page(
-                space_key=args.space,
-                title=args.title,
-                storage_xhtml=storage_xhtml,
-                parent_id=parent_id,
-            )
-        except HwikiHttpError as e:
-            print(f"ERROR: create: {e.status_code} {e.body}", file=sys.stderr)
-            sys.exit(3)
+    parent_id = None
+    if parent:
+        parent_id = client.resolve_page_id(parent)
 
-        host = self.get_config()["host"].rstrip("/")
-        url = f"{host}/pages/{page['id']}"
-        print(f"created page id={page['id']} title={page['title']} url={url}")
+    try:
+        page = client.create_page(
+            space_key=space,
+            title=title,
+            storage_xhtml=storage_xhtml,
+            parent_id=parent_id,
+        )
+    except HwikiHttpError as e:
+        typer.echo(f"ERROR: create: {e.status_code} {e.body}", err=True)
+        raise typer.Exit(3)
+
+    host = get_config()["host"].rstrip("/")
+    url = f"{host}/pages/{page['id']}"
+    typer.echo(f"created page id={page['id']} title={page['title']} url={url}")
