@@ -6,7 +6,7 @@ CLI для Confluence Server/DC — чтение, запись и двустор
 
 `git@github.com:wiliam/hwiki.git` — ветка `main`.
 Установка для разработки: `pipx install -e .` (из папки проекта).
-Пользовательская установка: `pipx install 'git+ssh://git@github.com/wiliam/hwiki.git@master'`
+Пользовательская установка: `pipx install 'git+ssh://git@github.com/wiliam/hwiki.git@main'`
 
 ## Конфиг
 

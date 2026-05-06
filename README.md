@@ -7,7 +7,7 @@ CLI для работы с Confluence Server/Data Center. Читает стра�
 ## Установка
 
 ```
-pipx install 'git+ssh://git@github.com/wiliam/hwiki.git@master'
+pipx install 'git+ssh://git@github.com/wiliam/hwiki.git@main'
 ```
 
 ## Конфиг
