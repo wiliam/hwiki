@@ -89,13 +89,22 @@ class ConfluenceClient:
             download_url=result["_links"]["download"],
         )
 
-    def get_children(self, page_id: str, limit: int = 50) -> list[Page]:
-        """Fetch direct child pages (metadata only, no body)."""
-        data = self._http.get(
-            f"rest/api/content/{page_id}/child/page",
-            params={"expand": "version,space", "limit": limit},
-        )
-        return [_parse_page(r) for r in data.get("results", [])]
+    def get_children(self, page_id: str) -> list[Page]:
+        """Fetch all direct child pages (metadata only, no body), paginating as needed."""
+        results: list[Page] = []
+        start = 0
+        limit = 50
+        while True:
+            data = self._http.get(
+                f"rest/api/content/{page_id}/child/page",
+                params={"expand": "version,space", "limit": limit, "start": start},
+            )
+            batch = data.get("results", [])
+            results.extend(_parse_page(r) for r in batch)
+            if len(batch) < limit:
+                break
+            start += limit
+        return results
 
     def get_attachment_content(self, download_url: str) -> bytes:
         """Download raw attachment bytes. download_url is relative (from Attachment.download_url)."""

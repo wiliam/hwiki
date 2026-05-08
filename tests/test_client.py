@@ -157,6 +157,39 @@ def test_update_page(client):
 
 
 # ---------------------------------------------------------------------------
+# get_children — pagination
+# ---------------------------------------------------------------------------
+
+@respx.mock
+def test_get_children_pagination(client):
+    """get_children must follow pagination and return all results."""
+    def _child(cid):
+        return {
+            "id": cid,
+            "title": f"Child {cid}",
+            "space": {"key": "ENG"},
+            "version": {"number": 1},
+            "body": {"storage": {"value": ""}},
+        }
+
+    page1 = {"results": [_child(str(i)) for i in range(50)]}
+    page2 = {"results": [_child(str(i)) for i in range(50, 75)]}
+
+    url = f"{BASE}/rest/api/content/123/child/page"
+    route = respx.get(url).mock(side_effect=[
+        httpx.Response(200, json=page1, headers={"Content-Type": "application/json"}),
+        httpx.Response(200, json=page2, headers={"Content-Type": "application/json"}),
+    ])
+
+    children = client.get_children("123")
+    assert len(children) == 75
+    assert route.call_count == 2
+    # Second request must include start=50
+    second_req = route.calls[1].request
+    assert "start=50" in str(second_req.url)
+
+
+# ---------------------------------------------------------------------------
 # upload_attachment
 # ---------------------------------------------------------------------------
 
