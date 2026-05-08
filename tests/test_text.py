@@ -1,4 +1,4 @@
-from hwiki._text import parse_page_id, parse_display_url
+from hwiki._text import parse_page_id, parse_display_url, is_tiny_link
 
 
 def test_raw_id():
@@ -40,3 +40,14 @@ def test_display_url_encoded():
 
 def test_display_url_no_match():
     assert parse_display_url("https://wiki.example.com/pages/123") == ("", "")
+
+
+def test_is_tiny_link_matches():
+    assert is_tiny_link("https://wiki.example.com/x/MqfKIw") is True
+    assert is_tiny_link("https://wiki.example.com/x/AbCdEf123") is True
+
+
+def test_is_tiny_link_no_match():
+    assert is_tiny_link("https://wiki.example.com/pages/123") is False
+    assert is_tiny_link("https://wiki.example.com/display/ENG/Title") is False
+    assert is_tiny_link("123456") is False

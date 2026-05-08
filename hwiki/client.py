@@ -3,7 +3,7 @@ from pathlib import Path
 
 from ._http import HttpClient
 from ._types import Page, SearchHit, Attachment
-from ._text import parse_page_id, parse_display_url
+from ._text import parse_page_id, parse_display_url, is_tiny_link
 
 
 class ConfluenceClient:
@@ -11,7 +11,9 @@ class ConfluenceClient:
         self._http = http
 
     def resolve_page_id(self, value: str) -> str:
-        """Resolve any page reference (ID, viewpage URL, or display URL) to a numeric ID."""
+        """Resolve any page reference (ID, viewpage URL, display URL, or tiny link) to a numeric ID."""
+        if is_tiny_link(value):
+            value = self._http.resolve_redirect(value)
         pid = parse_page_id(value)
         if pid.isdigit():
             return pid

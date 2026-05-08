@@ -160,6 +160,15 @@ def test_update_page(client):
 # upload_attachment
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# resolve_page_id — tiny link
+# ---------------------------------------------------------------------------
+
+def test_resolve_page_id_tiny_link(client, http):
+    http.resolve_redirect = lambda url: f"{BASE}/pages/viewpage.action?pageId=99999"
+    assert client.resolve_page_id(f"{BASE}/x/MqfKIw") == "99999"
+
+
 @respx.mock
 def test_upload_attachment(client, tmp_path):
     # Create a temp file to upload

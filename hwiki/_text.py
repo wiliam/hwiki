@@ -25,6 +25,12 @@ def parse_page_id(value: str) -> str:
     return value
 
 
+def is_tiny_link(value: str) -> bool:
+    """Return True for Confluence short URLs like https://host/x/AbCdEf."""
+    parsed = urlparse(value)
+    return bool(re.match(r"/x/[A-Za-z0-9_-]+$", parsed.path))
+
+
 def parse_display_url(value: str) -> tuple[str, str]:
     """Parse a /display/SPACE/Title URL into (space_key, decoded_title).
 

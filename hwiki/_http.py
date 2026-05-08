@@ -87,6 +87,11 @@ class HttpClient:
     def put(self, path, **kw): return self.request("PUT", path, **kw)
     def delete(self, path, **kw): return self.request("DELETE", path, **kw)
 
+    def resolve_redirect(self, url: str) -> str:
+        """Follow redirects and return the final URL (e.g. for tiny links)."""
+        resp = self._client.head(url, follow_redirects=True)
+        return str(resp.url)
+
     def close(self):
         self._client.close()
 
